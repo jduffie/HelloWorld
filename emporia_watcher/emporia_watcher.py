@@ -174,10 +174,15 @@ def _notify_ntfy(config: dict, title: str, body: str, url: str | None) -> None:
     topic_url = cfg.get("topic_url")
     if not topic_url:
         raise RuntimeError("notify.ntfy.topic_url not set in config")
-    headers = {"Title": title, "Priority": "high", "Tags": "rotating_light"}
+    # HTTP headers are latin-1 only, so strip any emoji/non-latin-1 from the
+    # Title header (it would otherwise raise and drop the alert). The full title
+    # is prepended to the UTF-8 body so nothing is lost in the notification.
+    safe_title = title.encode("latin-1", "ignore").decode("latin-1").strip() or "Emporia watcher"
+    headers = {"Title": safe_title, "Priority": "high", "Tags": "rotating_light"}
     if url:
         headers["Click"] = url
-    resp = requests.post(topic_url, data=body.encode("utf-8"), headers=headers, timeout=15)
+    full_body = f"{title}\n{body}" if safe_title != title else body
+    resp = requests.post(topic_url, data=full_body.encode("utf-8"), headers=headers, timeout=15)
     resp.raise_for_status()
 
 
@@ -214,35 +219,67 @@ def _notify_smtp(config: dict, title: str, body: str) -> None:
 # --------------------------------------------------------------------------- #
 # Core polling                                                                  #
 # --------------------------------------------------------------------------- #
-def check_source(source: dict, hc: dict) -> tuple[bool, str]:
-    """Return (available, variant_label). Raises SourceError on net/parse fail."""
+def source_variant_ids(source: dict) -> list[int]:
+    """Watched variant ids for a source.
+
+    Accepts `variant_ids = [..]` (preferred — watch the hardwired variant for
+    each connector you'll accept) or a single legacy `variant_id`.
+    """
+    ids = source.get("variant_ids")
+    if ids is None:
+        single = source.get("variant_id")
+        ids = [single] if single else []
+    return [int(i) for i in ids if i]
+
+
+def check_source(source: dict, hc: dict) -> list[tuple[int, bool, str]]:
+    """Return [(variant_id, available, label), ...] for every watched variant.
+
+    Fetches the product once. A network/parse failure raises SourceError (caller
+    skips the whole source). A single missing variant id is logged and skipped
+    so one bad id never blinds the other watched variants.
+    """
     product = fetch_product(source["json_url"], hc)
-    variant = find_variant(product, source["variant_id"])
-    return bool(variant.get("available")), variant_label(variant)
+    results: list[tuple[int, bool, str]] = []
+    for vid in source_variant_ids(source):
+        try:
+            variant = find_variant(product, vid)
+        except SourceError as exc:
+            log(f"  {source.get('name', '?')}: {exc}", err=True)
+            continue
+        results.append((vid, bool(variant.get("available")), variant_label(variant)))
+    return results
 
 
 def handle_transition(config: dict, state: dict, name: str, source: dict,
-                      available: bool, label: str) -> None:
-    """Compare to last-known state and alert only on false -> true."""
-    prev = state["sources"].get(name, {}).get("available")
-    state["sources"][name] = {
-        "available": available,
-        "label": label,
-        "checked_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    status = "IN STOCK" if available else "out of stock"
-    log(f"  {name}: {label} -> {status} (was {prev})")
+                      readings: list[tuple[int, bool, str]]) -> None:
+    """Compare each watched variant to last-known state; alert only on false -> true.
 
-    if available and prev is False:
-        notify(
-            config,
-            title=f"🔌 IN STOCK: Emporia Pro ({name})",
-            message=f"{label} just flipped to IN STOCK at {name}. Buy now:",
-            url=source["product_url"],
-        )
-    elif available and prev is None:
-        # First ever observation already in stock: inform, but it's not a flip.
-        log(f"  {name}: already in stock on first run (no flip alert).")
+    State per source is keyed by variant id so each watched variant (e.g. the
+    NACS-hardwired and J1772-hardwired SKUs) transitions independently.
+    """
+    src_state = state["sources"].setdefault(name, {})
+    for vid, available, label in readings:
+        key = str(vid)
+        prev = src_state.get(key, {}).get("available")
+        src_state[key] = {
+            "available": available,
+            "label": label,
+            "checked_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        status = "IN STOCK" if available else "out of stock"
+        log(f"  {name}: {label} -> {status} (was {prev})")
+
+        if available and prev is False:
+            notify(
+                config,
+                title=f"🔌 IN STOCK: Emporia Pro ({name})",
+                message=f"{label} just flipped to IN STOCK at {name}. Buy now:",
+                url=source["product_url"],
+            )
+        elif available and prev is None:
+            # First ever observation already in stock: inform, but it's not a flip.
+            log(f"  {name}: {label} already in stock on first run (no flip alert).")
 
 
 def maybe_heartbeat(config: dict, state: dict) -> None:
@@ -253,10 +290,11 @@ def maybe_heartbeat(config: dict, state: dict) -> None:
     now = datetime.now()
     if state.get("last_heartbeat") == today or now.hour < hb_hour:
         return
-    summary = ", ".join(
-        f"{n}: {'IN STOCK' if s.get('available') else 'OOS'}"
-        for n, s in state["sources"].items()
-    ) or "no sources checked yet"
+    parts = []
+    for n, variants in state["sources"].items():
+        any_in = any(v.get("available") for v in variants.values())
+        parts.append(f"{n}: {'IN STOCK' if any_in else 'OOS'}")
+    summary = ", ".join(parts) or "no sources checked yet"
     notify(config, title="💓 Emporia watcher alive", message=f"Still watching. {summary}.")
     state["last_heartbeat"] = today
 
@@ -271,16 +309,16 @@ def run_once(config: dict, state_path: Path) -> None:
 
     for source in sources:
         name = source.get("name", source.get("json_url", "?"))
-        if not source.get("variant_id"):
-            log(f"  {name}: variant_id not set — run --resolve first. SKIPPING.", err=True)
+        if not source_variant_ids(source):
+            log(f"  {name}: variant_ids not set — run --resolve first. SKIPPING.", err=True)
             continue
         try:
-            available, label = check_source(source, hc)
+            readings = check_source(source, hc)
         except SourceError as exc:
             # Error -> log and SKIP. Never treat as out-of-stock.
             log(f"  {name}: ERROR, skipping this run: {exc}", err=True)
             continue
-        handle_transition(config, state, name, source, available, label)
+        handle_transition(config, state, name, source, readings)
 
     maybe_heartbeat(config, state)
     save_state(state_path, state)
@@ -303,12 +341,13 @@ def resolve(config: dict) -> None:
         print(f"  product: {product.get('title')}  (handle: {product.get('handle')})")
         print(f"  {'id':>14}  {'available':>9}  title / options")
         print(f"  {'-'*14}  {'-'*9}  {'-'*40}")
+        watched = set(source_variant_ids(source))
         for v in product.get("variants", []):
-            mark = "<-- configured" if int(v.get("id", -1)) == int(source.get("variant_id") or -1) else ""
+            mark = "<-- configured" if int(v.get("id", -1)) in watched else ""
             print(f"  {v.get('id'):>14}  {str(bool(v.get('available'))):>9}  "
                   f"{variant_label(v)} {mark}")
-    print("\nPick the row that is J1772 AND Hardwired; put its id in config.toml "
-          "as that source's variant_id.\n")
+    print("\nPick the HARDWIRED row(s) you'll accept (any connector — NACS and/or "
+          "J1772) and list their ids in config.toml as that source's variant_ids.\n")
 
 
 # --------------------------------------------------------------------------- #
@@ -324,10 +363,12 @@ def self_test(config: dict) -> None:
     name = source.get("name", "test")
     # Fabricate prior state = out of stock, current reading = in stock, and run
     # the REAL transition logic so notify() fires through the configured channel.
-    fake_state = {"sources": {name: {"available": False}}, "last_heartbeat": None}
+    fake_vid = (source_variant_ids(source) or [1])[0]
+    fake_state = {"sources": {name: {str(fake_vid): {"available": False}}},
+                  "last_heartbeat": None}
     handle_transition(
         config, fake_state, name, source,
-        available=True, label="J1772 / Hardwired (TEST)",
+        [(fake_vid, True, "Hardwired (TEST)")],
     )
     log("--test complete. If you did not receive an alert, check notify config above.")
 

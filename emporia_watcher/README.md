@@ -1,8 +1,9 @@
 # Emporia Pro EV Charger — stock watcher
 
-Polls two retailers' Shopify product JSON and pushes an alert the moment the
-**hardwired + J1772** Emporia Pro variant flips from out-of-stock to in-stock.
-J1772 only — *not* NACS.
+Polls two retailers' Shopify product JSON and pushes an alert the moment a
+**hardwired** Emporia Pro variant flips from out-of-stock to in-stock. Connector
+doesn't matter — list whichever hardwired SKUs you'll accept (NACS and/or
+J1772; adapters cover the difference) and an alert fires when any of them flips.
 
 - Reads structured Shopify variant data (`<product>.json`), never scrapes HTML.
 - Alerts **only** on a false → true (out → in stock) transition.
@@ -30,7 +31,7 @@ cp config.example.toml config.toml       # config.toml is gitignored (holds secr
 ### Step 1 — resolve the variant IDs (do this first)
 
 Don't trust the handles/variant guesses. Print every variant and pick the
-**J1772 + Hardwired** row:
+**hardwired** row(s) — any connector you'll accept:
 
 ```bash
 python3 emporia_watcher.py --resolve
@@ -44,15 +45,18 @@ Example output (ids illustrative):
               id  available  title / options
   --------------  ---------  ----------------------------------------
   43512345678901      False  J1772 / NEMA 14-50
-  43512345678902      False  J1772 / Hardwired        <-- this one
-  43512345678903       True  NACS / Hardwired
+  43512345678902      False  J1772 / Hardwired        <-- want
+  43512345678903       True  NACS / Hardwired         <-- want (adapter)
+  43512345678904      False  NACS / NEMA 14-50
 ```
 
 > Note: if a handle 404s, open the store, find the correct product, and update
 > `json_url` / `product_url` / `handle` in `config.toml`.
 
-Copy the J1772 + Hardwired `id` into `config.toml` as that source's
-`variant_id`. A source whose `variant_id` is still `0` is skipped with a notice.
+List every **hardwired** `id` you'd buy (NACS and/or J1772) in `config.toml` as
+that source's `variant_ids`, e.g. `variant_ids = [43512345678902, 43512345678903]`.
+An alert fires when any listed variant flips in-stock. A source with an empty
+`variant_ids` is skipped with a notice.
 
 ### Step 2 — set up alerts
 
@@ -111,8 +115,8 @@ rather use cron, every 20 minutes:
 
 ## How it decides "in stock"
 
-For each source it fetches `<product>.json`, finds the variant whose `id`
-matches `variant_id`, and reads its `available` boolean. It compares to the
-last value in `state.json` and alerts only when it sees `False → True`. First-
-ever observation (no prior state) never alerts, even if already in stock — only
-genuine flips do.
+For each source it fetches `<product>.json` once, then for every id in
+`variant_ids` reads that variant's `available` boolean. Each watched variant is
+tracked independently in `state.json` (keyed by id), and an alert fires only
+when one sees `False → True`. First-ever observation (no prior state) never
+alerts, even if already in stock — only genuine flips do.

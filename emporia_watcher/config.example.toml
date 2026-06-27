@@ -47,18 +47,21 @@ from_addr = ""
 to_addr = ""
 
 # --------------------------------------------------------------------------- #
-# Sources. variant_id MUST be the J1772 + Hardwired variant — resolve it with:
+# Sources. variant_ids = the HARDWIRED variant(s) you'll accept. Connector
+# doesn't matter (NACS and/or J1772 — adapters cover the difference), so list
+# every hardwired SKU you'd buy. An alert fires when ANY listed variant flips
+# in-stock. Resolve the ids with:
 #     python3 emporia_watcher.py --resolve
-# then copy the matching id here. Leave 0 until resolved (source is skipped).
+# then copy the matching ids here. Empty list = source skipped until resolved.
 # --------------------------------------------------------------------------- #
 [[sources]]
 name = "emporia"
 product_url = "https://shop.emporiaenergy.com/products/emporia-pro-ev-charger"
 json_url = "https://shop.emporiaenergy.com/products/emporia-pro-ev-charger.json"
-variant_id = 0  # <-- J1772 / Hardwired id from --resolve
+variant_ids = []  # <-- hardwired ids (NACS and/or J1772) from --resolve, e.g. [123, 456]
 
 [[sources]]
 name = "qmerit"
 product_url = "https://shop.qmerit.com/products/emporia-pro-ev-charger-w-powersmart"
 json_url = "https://shop.qmerit.com/products/emporia-pro-ev-charger-w-powersmart.json"
-variant_id = 0  # <-- J1772 / Hardwired id from --resolve
+variant_ids = []  # <-- hardwired ids (NACS and/or J1772) from --resolve
