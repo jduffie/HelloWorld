@@ -1,0 +1,64 @@
+# Emporia Pro EV charger stock watcher — configuration template.
+#
+#   cp config.example.toml config.toml      # then edit config.toml
+#
+# config.toml holds your ntfy topic / Pushover / SMTP secrets and is gitignored.
+# Resolve the variant ids FIRST (see README), then paste them below.
+
+# How often launchd/cron runs the script (used only to label logs + the plist
+# interval you set; the script itself does one poll per invocation).
+poll_interval_minutes = 20
+
+# Daily "still alive, still OOS" heartbeat. Sends at most once per day, on/after
+# heartbeat_hour (local 24h clock), the first time the watcher runs that hour.
+heartbeat = true
+heartbeat_hour = 9
+
+[http]
+# Be polite: a real UA, per-request timeout, light retry with exponential backoff.
+user_agent = "Mozilla/5.0 (Macintosh; Apple Silicon Mac OS X 14_0) EmporiaStockWatcher/1.0"
+timeout_seconds = 15
+retries = 3
+backoff_base_seconds = 2
+
+# --------------------------------------------------------------------------- #
+# Alerting. channel = "ntfy" (default) | "pushover" | "smtp"
+# --------------------------------------------------------------------------- #
+[notify]
+channel = "ntfy"
+
+[notify.ntfy]
+# Pick an unguessable topic name, then subscribe to it in the ntfy app.
+# No account needed. Example: https://ntfy.sh/emporia-pro-7h3k9q2x
+topic_url = "https://ntfy.sh/CHANGE-ME-to-an-unguessable-topic"
+
+[notify.pushover]
+# STUB — only used when channel = "pushover".
+token = ""
+user = ""
+
+[notify.smtp]
+# STUB — only used when channel = "smtp". Use an app password, not your login.
+host = ""
+port = 587
+username = ""
+password = ""
+from_addr = ""
+to_addr = ""
+
+# --------------------------------------------------------------------------- #
+# Sources. variant_id MUST be the J1772 + Hardwired variant — resolve it with:
+#     python3 emporia_watcher.py --resolve
+# then copy the matching id here. Leave 0 until resolved (source is skipped).
+# --------------------------------------------------------------------------- #
+[[sources]]
+name = "emporia"
+product_url = "https://shop.emporiaenergy.com/products/emporia-pro-ev-charger"
+json_url = "https://shop.emporiaenergy.com/products/emporia-pro-ev-charger.json"
+variant_id = 0  # <-- J1772 / Hardwired id from --resolve
+
+[[sources]]
+name = "qmerit"
+product_url = "https://shop.qmerit.com/products/emporia-pro-ev-charger-w-powersmart"
+json_url = "https://shop.qmerit.com/products/emporia-pro-ev-charger-w-powersmart.json"
+variant_id = 0  # <-- J1772 / Hardwired id from --resolve

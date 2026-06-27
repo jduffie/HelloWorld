@@ -1,0 +1,6 @@
+# Secrets + runtime state — never commit these.
+config.toml
+state.json
+state.json.tmp
+watcher.log
+watcher.err.log

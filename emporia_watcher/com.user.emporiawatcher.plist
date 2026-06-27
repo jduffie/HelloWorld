@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.emporiawatcher</string>
+
+    <!-- EDIT these two absolute paths for your machine.
+         Find python3 with:  which python3
+         (Apple Silicon Homebrew is usually /opt/homebrew/bin/python3) -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/CHANGE_ME/emporia_watcher/emporia_watcher.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/CHANGE_ME/emporia_watcher</string>
+
+    <!-- 20 minutes, in seconds. Match poll_interval_minutes in config.toml. -->
+    <key>StartInterval</key>
+    <integer>1200</integer>
+
+    <!-- Run once shortly after load/login so you don't wait a full interval. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/CHANGE_ME/emporia_watcher/watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/CHANGE_ME/emporia_watcher/watcher.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
