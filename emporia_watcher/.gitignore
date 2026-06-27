@@ -4,3 +4,7 @@ state.json
 state.json.tmp
 watcher.log
 watcher.err.log
+
+# Python bytecode
+__pycache__/
+*.pyc
